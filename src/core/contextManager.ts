@@ -4,9 +4,10 @@ import { CandidateSchema, MessageSchema, MemorySchema, type Candidate, type Memo
 import type { MemoryStore, VectorProvider } from '../storage/database.js';
 import { RuleExtractor, type ContextExtractor } from './extractor.js';
 import { verifyMemorySource } from './provenance.js';
-import { detectConflict, sameDomain } from './conflictDetector.js';
+import { classifyRelation, sameDomain } from './conflictDetector.js';
 import { visible, relevance, isStale } from './relevance.js';
 import { generateWorkingSummary, buildPromptContext } from './summarizer.js';
+import { explainMemory as explain } from './explanation.js';
 const userKinds=new Set(['confirmed_fact','user_preference','user_goal','decision','task_state']);
 export function classifyMemory(c:Candidate,m:Message):MemoryItem['type'] {return m.role==='user'?c.type:(c.type==='assistant_inference'?'assistant_inference':'assistant_claim')}
 export class ContextManager {
@@ -30,21 +31,25 @@ export class ContextManager {
     });
   }
   private commitCandidate(s:State,c:Candidate,m:Message){
-    if(!m.text.includes(c.quote) || c.content!==c.quote)throw Error('Unsupported evidence: content must equal verbatim quote');
+    if(!m.text.includes(c.quote))throw Error('Unsupported evidence: quote is not present in source message');
+    if(!c.normalizedContent && c.content!==c.quote)throw Error('Unsupported evidence: normalizedContent is required for rewritten content');
+    if(c.sourceMessageId && c.sourceMessageId!==m.id)throw Error('Candidate sourceMessageId mismatch');
     if(c.scope==='long_term' && !s.longTermEnabled)throw Error('Long-term memory disabled');
     if(c.scope==='project' && !m.projectId)throw Error('Project scope requires projectId');
     const type=classifyMemory(c,m), confirmed=m.role==='user' && userKinds.has(type);
-    const item=MemorySchema.parse({...c,type,id:randomUUID(),conversationId:m.conversationId,projectId:m.projectId,sourceMessageIds:[m.id],confidence:confirmed?1:m.role==='user'?.7:.5,importance:['user_goal','task_state','decision'].includes(type)?.95:type==='temporary_context'?.1:.65,status:'active',createdAt:m.timestamp,updatedAt:m.timestamp,validFrom:m.timestamp,lastConfirmedAt:confirmed?m.timestamp:undefined,supersedes:[],contradictedBy:[]});
+    const item=MemorySchema.parse({...c,normalizedContent:c.normalizedContent??c.content,type,id:randomUUID(),conversationId:m.conversationId,projectId:m.projectId,sourceMessageIds:[m.id],confidence:confirmed?1:m.role==='user'?.7:.5,importance:['user_goal','task_state','decision'].includes(type)?.95:type==='temporary_context'?.1:.65,status:'active',createdAt:m.timestamp,updatedAt:m.timestamp,validFrom:m.timestamp,lastConfirmedAt:confirmed?m.timestamp:undefined,supersedes:[],contradictedBy:[]});
     const existing=s.memories.filter(x=>sameDomain(x,item) && ['active','contradicted'].includes(x.status));
-    const explicitCorrection=m.role==='user' && /改成|改目标|改为|更正|纠正|不再|现在.*目标/.test(c.quote);
+    const explicitCorrection=m.role==='user' && /改成|改目标|改为|更正|纠正|不再|现在.*目标|还是/.test(c.quote);
     // Model-supplied operation/IDs cannot authorize a state transition.
-    if(confirmed)for(const old of existing.filter(x=>userKinds.has(x.type) && detectConflict(x,item))){
-      if(explicitCorrection && Date.parse(m.timestamp)>=Date.parse(old.updatedAt)){
+    if(confirmed)for(const old of existing.filter(x=>userKinds.has(x.type))){
+      const relation=classifyRelation(old,item); if(relation==='SAME'||relation==='EXTENDS'||relation==='INDEPENDENT') continue;
+      if(explicitCorrection && (relation==='SUPERSEDES'||relation==='CONTRADICTS') && Date.parse(m.timestamp)>=Date.parse(old.updatedAt)){
         old.status='superseded';old.updatedAt=m.timestamp;item.supersedes.push(old.id);this.audit(s,'memory_superseded',[old.id,item.id],'Explicit user correction',m);
       }else{old.status='contradicted';old.updatedAt=m.timestamp;item.status='contradicted';old.contradictedBy.push(item.id);item.contradictedBy.push(old.id);this.audit(s,'conflict_detected',[old.id,item.id],'Different assertions; no explicit correction',m)}
     }
     s.memories.push(item);this.audit(s,'memory_stored',[item.id],`Verbatim ${m.role} evidence; classified ${type}; confidence ${item.confidence}`,m);return item;
   }
+  explainMemory(id:string){return explain(id,this.store.read())}
   verifyMemorySource(id:string){const s=this.store.read();const m=s.memories.find(x=>x.id===id);if(!m)throw Error('Unknown memory');return verifyMemorySource(m,s)}
   // Explicit corrections are routed through ingestion, preserving evidence and the audit transaction.
   storeMemory(message:unknown){return this.ingestMessage(message)}

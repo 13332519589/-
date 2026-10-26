@@ -40,3 +40,11 @@ const prompt = manager.buildPromptContext({conversationId:'c1', text:'我的目�
 ## 验证与限制
 
 14 个单元/集成测试覆盖长期保留、更新、冲突、助手污染、纠错、摘要重建、时间有效性、作用域、SQLite 持久化、删除和事务回滚。当前离线 `RuleExtractor` 只演示少量中文模式；生产环境应使用受约束的 LLM extractor、人工/外部来源验证器、加密与访问控制、规范化 PostgreSQL 表和真正的 embedding/vector provider。删除向量索引采用可重试 pending outbox；若外部 provider 暂时不可用，应用应监控待删除队列。
+
+## Production integration
+
+`ProductionLLMExtractor` accepts only the current message and caller-supplied candidate memories. It validates a strict Zod result containing `quote`, `sourceMessageId`, and optional `normalizedContent`; the LLM cannot mutate state or authorize transitions. `RuleExtractor` remains the offline fallback.
+
+Memory relations are classified as `SAME`, `EXTENDS`, `SUPERSEDES`, `CONTRADICTS`, `INDEPENDENT`, or `UNCERTAIN`. Only deterministic policy changes state. `explainMemory(id)` returns source messages, verbatim evidence, normalized content, audit rationale, superseded items, and conflicts.
+
+The optional HTTP integration layer is exported by `createContextServer(manager)` and exposes `POST /messages`, `GET /context`, `GET /memories`, `POST /memories/:id/correct`, `DELETE /memories/:id`, `DELETE /conversations/:id`, and `POST /context/build`.

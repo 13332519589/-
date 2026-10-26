@@ -6,3 +6,6 @@ export * from './core/conflictDetector.js';
 export * from './core/provenance.js';
 export * from './core/relevance.js';
 export * from './core/summarizer.js';
+export * from './core/explanation.js';
+export * from './core/conflictDetector.js';
+export * from './integration/server.js';
