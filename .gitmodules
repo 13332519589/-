@@ -1,0 +1,4 @@
+[submodule "vendor/MegaMemory"]
+	path = vendor/MegaMemory
+	url = https://github.com/0xK3vin/MegaMemory.git
+	branch = main
