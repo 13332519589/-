@@ -83,3 +83,7 @@ curl http://localhost:3000/health
 ```
 
 A remote MCP client connects to `http://host:3000/mcp` with `Authorization: Bearer <token>`. Account/workspace availability for ChatGPT remote MCP connections depends on the applicable OpenAI product plan and workspace permissions; this server does not modify or monitor ChatGPT clients. The current remote implementation is stateless per request and is intended for a deployment with shared persistent storage; horizontal scaling should add a shared store and coordinated session strategy.
+
+## V4.1 identity security patch
+
+MCP server construction now requires an explicit identity mode. stdio uses `trusted-local` and may use the fixed local development principal. Remote Streamable HTTP always uses `authenticated-remote`; missing or malformed `authInfo.extra.principalId` fails closed for every read and write tool. Remote tool authorization never falls back to local identity, and memory ownership is checked before caller-supplied conversation IDs. Identical `remember_context` calls are idempotent because the existing message ID collision/idempotency path returns no second memory.

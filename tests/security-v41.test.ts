@@ -1,0 +1,9 @@
+import {test} from 'node:test'; import assert from 'node:assert/strict';
+import {Client} from '@modelcontextprotocol/sdk/client/index.js'; import {InMemoryTransport} from '@modelcontextprotocol/sdk/inMemory.js';
+import {ContextManager,InMemoryStore,createMcpServer} from '../src/index.js';
+const msg={conversationId:'v41',messageId:'v41-1',role:'user' as const,text:'我的目标是考A大学。',timestamp:'2026-10-26T00:00:00Z'};
+async function pair(mode:'trusted-local'|'authenticated-remote'){const server=createMcpServer(new ContextManager(new InMemoryStore()),{identityMode:mode});const [a,b]=InMemoryTransport.createLinkedPair();const client=new Client({name:'v41',version:'1'});await Promise.all([server.connect(a),client.connect(b)]);return {server,client}}
+async function call(client:Client,name:string,arguments_:any){return client.callTool({name,arguments:arguments_}) as any}
+test('authenticated remote fails closed without authInfo for read and write',async()=>{const {client,server}=await pair('authenticated-remote');const read=await call(client,'search_context',{conversationId:'v41',query:'目标'});const write=await call(client,'remember_context',msg);assert.equal(read.isError,true);assert.equal(write.isError,true);await client.close();await server.close()});
+test('explicit trusted local mode remains available',async()=>{const {client,server}=await pair('trusted-local');const x=await call(client,'remember_context',msg);assert.equal(x.isError,undefined);await client.close();await server.close()});
+test('remember identical call is idempotent',async()=>{const {client,server}=await pair('trusted-local');const a=await call(client,'remember_context',msg);const b=await call(client,'remember_context',msg);const one=JSON.parse(a.content[0].text),two=JSON.parse(b.content[0].text);assert.equal(one.storedMemoryIds.length,1);assert.equal(two.storedMemoryIds.length,0);await client.close();await server.close()});
