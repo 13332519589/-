@@ -48,3 +48,21 @@ const prompt = manager.buildPromptContext({conversationId:'c1', text:'我的目�
 Memory relations are classified as `SAME`, `EXTENDS`, `SUPERSEDES`, `CONTRADICTS`, `INDEPENDENT`, or `UNCERTAIN`. Only deterministic policy changes state. `explainMemory(id)` returns source messages, verbatim evidence, normalized content, audit rationale, superseded items, and conflicts.
 
 The optional HTTP integration layer is exported by `createContextServer(manager)` and exposes `POST /messages`, `GET /context`, `GET /memories`, `POST /memories/:id/correct`, `DELETE /memories/:id`, `DELETE /conversations/:id`, and `POST /context/build`.
+
+## MCP integration
+
+This release uses the official `@modelcontextprotocol/sdk` version `1.32.2` and the SDK `McpServer` plus `StdioServerTransport`; no MCP wire protocol is implemented locally. Start the local server with:
+
+```bash
+npm install
+npm run mcp
+# or CONTEXT_DB_PATH=/path/context.sqlite npm run mcp
+```
+
+The six tools are `remember_context` (write), `search_context` (read), `get_context` (read), `explain_memory` (read), `correct_memory` (write), and `forget_memory` (destructive write). An MCP-compatible client can connect over stdio; the test suite uses the official SDK `Client` and linked in-memory transport as an MCP Inspector-compatible protocol check. A typical stdio configuration is:
+
+```json
+{"mcpServers":{"context-state-manager":{"command":"npm","args":["run","mcp"],"cwd":"/absolute/path/context-state-manager"}}}
+```
+
+The default SQLite file is `context.sqlite`; long-term memory remains disabled unless explicitly enabled by the host application. MCP handlers never touch storage directly and all writes go through `ContextManager`. This system does not eliminate hallucinations. It primarily reduces risks caused by context loss, memory contamination, source confusion, and summary drift.

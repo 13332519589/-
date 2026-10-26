@@ -9,3 +9,5 @@ export * from './core/summarizer.js';
 export * from './core/explanation.js';
 export * from './core/conflictDetector.js';
 export * from './integration/server.js';
+export * from './mcp/server.js';
+export * from './mcp/tools.js';
