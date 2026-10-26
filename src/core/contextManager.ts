@@ -13,8 +13,8 @@ export function classifyMemory(c:Candidate,m:Message):MemoryItem['type'] {return
 export class ContextManager {
   constructor(readonly store:MemoryStore,private extractor:ContextExtractor=new RuleExtractor(),private vector?:VectorProvider){}
   private audit(s:State,kind:string,ids:string[],reason:string,message?:Message){s.events.push({id:randomUUID(),kind,memoryIds:ids,reason,messageId:message?.id,timestamp:message?.timestamp??new Date().toISOString()})}
-  async ingestMessage(input:unknown){
-    const m=MessageSchema.parse(input);
+  async ingestMessage(input:unknown, principalId?:string){
+    const m=MessageSchema.parse({...input as object, ...(principalId?{principalId}: {})});
     const prior=this.store.read().messages.find(x=>x.id===m.id);
     if(prior){if(JSON.stringify(prior)!==JSON.stringify(m))throw Error('Message ID collision');return []}
     const candidates=z.array(CandidateSchema).max(50).parse(await this.extractor.extractContext(m));
@@ -37,7 +37,7 @@ export class ContextManager {
     if(c.scope==='long_term' && !s.longTermEnabled)throw Error('Long-term memory disabled');
     if(c.scope==='project' && !m.projectId)throw Error('Project scope requires projectId');
     const type=classifyMemory(c,m), confirmed=m.role==='user' && userKinds.has(type);
-    const item=MemorySchema.parse({...c,normalizedContent:c.normalizedContent??c.content,type,id:randomUUID(),conversationId:m.conversationId,projectId:m.projectId,sourceMessageIds:[m.id],confidence:confirmed?1:m.role==='user'?.7:.5,importance:['user_goal','task_state','decision'].includes(type)?.95:type==='temporary_context'?.1:.65,status:'active',createdAt:m.timestamp,updatedAt:m.timestamp,validFrom:m.timestamp,lastConfirmedAt:confirmed?m.timestamp:undefined,supersedes:[],contradictedBy:[]});
+    const item=MemorySchema.parse({...c,normalizedContent:c.normalizedContent??c.content,type,id:randomUUID(),conversationId:m.conversationId,projectId:m.projectId,principalId:m.principalId,sourceMessageIds:[m.id],confidence:confirmed?1:m.role==='user'?.7:.5,importance:['user_goal','task_state','decision'].includes(type)?.95:type==='temporary_context'?.1:.65,status:'active',createdAt:m.timestamp,updatedAt:m.timestamp,validFrom:m.timestamp,lastConfirmedAt:confirmed?m.timestamp:undefined,supersedes:[],contradictedBy:[]});
     const existing=s.memories.filter(x=>sameDomain(x,item) && ['active','contradicted'].includes(x.status));
     const explicitCorrection=m.role==='user' && /改成|改目标|改为|更正|纠正|不再|现在.*目标|还是/.test(c.quote);
     // Model-supplied operation/IDs cannot authorize a state transition.
@@ -49,8 +49,8 @@ export class ContextManager {
     }
     s.memories.push(item);this.audit(s,'memory_stored',[item.id],`Verbatim ${m.role} evidence; classified ${type}; confidence ${item.confidence}`,m);return item;
   }
-  explainMemory(id:string){return explain(id,this.store.read())}
-  verifyMemorySource(id:string){const s=this.store.read();const m=s.memories.find(x=>x.id===id);if(!m)throw Error('Unknown memory');return verifyMemorySource(m,s)}
+  explainMemory(id:string, principalId?:string){const item=this.store.read().memories.find(m=>m.id===id);if(principalId&&item?.principalId!==principalId)throw Error('Unknown memoryId');return explain(id,this.store.read())}
+  verifyMemorySource(id:string, principalId?:string){const item=this.store.read().memories.find(m=>m.id===id);if(principalId&&item?.principalId!==principalId)throw Error('Unknown memory');const s=this.store.read();const m=s.memories.find(x=>x.id===id);if(!m)throw Error('Unknown memory');return verifyMemorySource(m,s)}
   // Explicit corrections are routed through ingestion, preserving evidence and the audit transaction.
   storeMemory(message:unknown){return this.ingestMessage(message)}
   async extractContext(input:unknown){const m=MessageSchema.parse(input);return z.array(CandidateSchema).parse(await this.extractor.extractContext(m))}
@@ -61,7 +61,7 @@ export class ContextManager {
   }
   retrieveRelevantContext(q:Query):ContextPackage {
     const s=this.store.read(),now=q.now??new Date().toISOString();const limit=Math.max(1,Math.min(q.limit??12,50));
-    const ranked=s.memories.filter(m=>visible(m,q)&&(m.scope!=='long_term'||s.longTermEnabled)&&['active','contradicted'].includes(m.status)&&relevance(m,q)>0).sort((a,b)=>relevance(b,q)-relevance(a,q));
+    const ranked=s.memories.filter(m=>visible(m,q)&&(m.scope!=='long_term'||s.longTermEnabled)&&(!q.principalId||m.principalId===q.principalId)&&['active','contradicted'].includes(m.status)&&relevance(m,q)>0).sort((a,b)=>relevance(b,q)-relevance(a,q));
     const selected=ranked.slice(0,limit);
     // Include the other side of selected conflicts; never silently hide a competing version.
     for(const m of [...selected])for(const id of m.contradictedBy){const peer=ranked.find(x=>x.id===id);if(peer&&!selected.includes(peer))selected.push(peer)}
@@ -78,7 +78,7 @@ export class ContextManager {
   setLongTermEnabled(enabled:boolean){this.store.transaction(s=>{s.longTermEnabled=enabled;this.audit(s,'privacy_setting',[],`Long-term enabled: ${enabled}`)})}
   inspectMemory(){return this.store.read().memories}
   exportMemory(){return this.store.read()}
-  async deleteMemory(id:string){await this.deleteWhere(m=>m.id===id)}
+  async deleteMemory(id:string, principalId?:string){await this.deleteWhere(m=>m.id===id&&(!principalId||m.principalId===principalId))}
   async deleteConversation(id:string){await this.deleteWhere(m=>m.conversationId===id,id)}
   async flushPendingDeletes(){const ids=this.store.read().pendingVectorDeletes;if(!ids.length)return;if(this.vector)await this.vector.delete(ids);this.store.transaction(s=>{s.pendingVectorDeletes=s.pendingVectorDeletes.filter(id=>!ids.includes(id))})}
   private async deleteWhere(predicate:(m:MemoryItem)=>boolean,conversationId?:string){

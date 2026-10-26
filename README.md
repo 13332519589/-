@@ -66,3 +66,20 @@ The six tools are `remember_context` (write), `search_context` (read), `get_cont
 ```
 
 The default SQLite file is `context.sqlite`; long-term memory remains disabled unless explicitly enabled by the host application. MCP handlers never touch storage directly and all writes go through `ContextManager`. This system does not eliminate hallucinations. It primarily reduces risks caused by context loss, memory contamination, source confusion, and summary drift.
+
+## Remote MCP deployment
+
+The remote endpoint uses the official SDK `StreamableHTTPServerTransport` at `POST /mcp`; stdio remains available with `npm run mcp`. Remote production startup requires `NODE_ENV=production` and `CONTEXT_MCP_TOKEN`; missing authentication configuration fails closed. Bearer tokens are compared in constant time and mapped to a server-derived principal. Tool handlers use that principal for tenant/conversation/memory isolation; model-supplied identity fields are ignored.
+
+Environment variables are documented in `.env.example`: `NODE_ENV`, `PORT`, `CONTEXT_DB_PATH`, and `CONTEXT_MCP_TOKEN`. The service also exposes unauthenticated `GET /health` with only status and version. Request bodies are limited to 1 MiB, malformed JSON and invalid tool schemas are rejected, and structured logs include request ID, tool, principal hash, outcome, latency, and timestamp without message text or tokens.
+
+Build and run the non-root image:
+
+```bash
+docker build -t context-state-manager .
+docker run --rm -p 3000:3000 -v context-data:/data \
+  -e NODE_ENV=production -e CONTEXT_MCP_TOKEN="$CONTEXT_MCP_TOKEN" context-state-manager
+curl http://localhost:3000/health
+```
+
+A remote MCP client connects to `http://host:3000/mcp` with `Authorization: Bearer <token>`. Account/workspace availability for ChatGPT remote MCP connections depends on the applicable OpenAI product plan and workspace permissions; this server does not modify or monitor ChatGPT clients. The current remote implementation is stateless per request and is intended for a deployment with shared persistent storage; horizontal scaling should add a shared store and coordinated session strategy.

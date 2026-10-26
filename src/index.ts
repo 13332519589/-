@@ -11,3 +11,6 @@ export * from './core/conflictDetector.js';
 export * from './integration/server.js';
 export * from './mcp/server.js';
 export * from './mcp/tools.js';
+
+export * from './mcp/auth.js';
+export * from './mcp/remote.js';
