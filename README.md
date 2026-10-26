@@ -87,3 +87,19 @@ A remote MCP client connects to `http://host:3000/mcp` with `Authorization: Bear
 ## V4.1 identity security patch
 
 MCP server construction now requires an explicit identity mode. stdio uses `trusted-local` and may use the fixed local development principal. Remote Streamable HTTP always uses `authenticated-remote`; missing or malformed `authInfo.extra.principalId` fails closed for every read and write tool. Remote tool authorization never falls back to local identity, and memory ownership is checked before caller-supplied conversation IDs. Identical `remember_context` calls are idempotent because the existing message ID collision/idempotency path returns no second memory.
+
+## Production Deployment and Remote E2E
+
+The container is deployment-ready for a platform that provides HTTPS, a persistent volume, and environment secrets. Set `NODE_ENV=production`, `PORT`, `CONTEXT_DB_PATH` to a path on the persistent volume, and `CONTEXT_MCP_TOKEN` through the platform secret manager. Do not put the token in Git, an image, or command output. The process refuses production startup without the token. Expose `POST /mcp` over the platform's HTTPS URL and use `GET /health` for a non-sensitive health check.
+
+Run the real remote MCP smoke test with the official SDK client:
+
+```bash
+REMOTE_MCP_URL=https://your-host.example/mcp \
+REMOTE_MCP_TOKEN="$CONTEXT_MCP_TOKEN" \
+npm run e2e:remote
+```
+
+The script checks discovery, remember/search, correction, provenance, anonymous and invalid-token rejection, prompt injection handling, and 100-turn retrieval. Persistence-after-restart is executed only when an operator supplies `REMOTE_MCP_RESTART_COMMAND`; otherwise it reports an explicit skip so a restart is never simulated or falsely claimed.
+
+ChatGPT or another MCP-compatible client can use the HTTPS `/mcp` endpoint with Bearer authentication when the product/workspace supports remote MCP connections. Availability depends on the applicable OpenAI plan and workspace permissions. This service does not modify ChatGPT and does not claim access to all ChatGPT conversations.
